@@ -173,5 +173,17 @@ export function buildNav(entry: any): string {
     navHtml += createVerticalMenu('Ekstrakurikuler', ekskulData);
   }
 
+  const standaloneData: any[] = entry.data.dataStandalone ?? [];
+  if (standaloneData.length > 0) {
+    standaloneData.forEach((item: any) => {
+      const url = constructGSheetUrl(item.value);
+      navHtml += `
+        <a href="#" data-url="${url}" data-path="${item.label}" class="nav-link px-4 py-4 text-white flex items-center hover:bg-atlantis-500 transition-colors duration-300">
+          <span>${item.label}</span>
+        </a>`;
+    });
+  }
+
   return navHtml;
 }
+

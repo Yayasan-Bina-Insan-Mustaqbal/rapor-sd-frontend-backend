@@ -1,28 +1,51 @@
 # Rapor
 
-Monorepo for the Rapor application:
+**Rapor** is a monorepo application designed to aggregate, organize, and view school report cards (*rapor*) stored across Google Drive and Google Sheets.
 
-- `frontend-astro-rapor/`: Astro frontend for browsing report data.
-- `backend-sheet-aggregator-rapor/`: Express service that reads Google Drive and Google Sheets, writes the compiled navigation tree to SQLite, and uploads backup files to the remote server.
-- `docker-compose.yml`: production-style multi-container setup for frontend, backend, and Caddy.
+It automatically parses hierarchical folder and spreadsheet structures in Google Drive, stores the compiled navigation structure in SQLite, backs up sheets into `.ods` format, and renders an interactive web portal for users to view reports.
 
-This root README replaces the scattered project notes with one setup, operations, and deployment guide.
+---
 
-## Architecture
+## 🏗️ Architecture
+
+```text
+                        ┌───────────────────────────────┐
+                        │       Caddy Reverse Proxy     │
+                        │     (TLS & Route Dispatch)    │
+                        └──────────────┬────────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+         /api/*     ▼                                     ▼   /*
+  ┌─────────────────────────────────┐   ┌─────────────────────────────────┐
+  │  Backend (Node.js / Express)    │   │     Frontend (Astro + Alpine)   │
+  │  - Google Drive & Sheets Sync   │   │  - Report Viewer Portal         │
+  │  - SQLite Database Storage      │   │  - Semester Switcher & Nav Menu │
+  │  - Backup creation (.ods files) │   │  - Admin Logs UI (/admin/logs)  │
+  │  - Scheduled Cron Job           │   └─────────────────────────────────┘
+  └────────────────┬────────────────┘
+                   │
+                   ▼
+  ┌─────────────────────────────────┐
+  │      Google Cloud APIs          │
+  │  (Google Drive + Google Sheets) │
+  └─────────────────────────────────┘
+```
 
 The stack has three runtime services:
 
-- `backend`: Node.js + Express API, SQLite storage, Google Drive/Sheets integration, scheduled sync job.
-- `frontend`: Astro site, powered by Alpine.js for interactive client-side state, providing both the main report viewer and a secure Admin Log Dashboard.
-- `caddy`: reverse proxy and TLS terminator. Requests to `/api/*` go to the backend; everything else goes to the frontend.
+- **`backend`**: Node.js + Express API, SQLite storage, Google Drive/Sheets integration, exponential backoff retries, and scheduled sync jobs.
+- **`frontend`**: Astro site powered by Alpine.js and DaisyUI for interactive client-side state, providing both the main report viewer and a secure Admin Log Dashboard.
+- **`caddy`**: Reverse proxy and TLS terminator. Requests to `/api/*` go to the backend; everything else goes to the frontend.
 
-High-level flow:
+### High-level flow:
 
-1. The backend traverses a configured Google Drive root folder.
-2. It reads spreadsheet metadata from Drive/Sheets.
-3. It compiles a `nav.json`-style tree and stores the latest version in SQLite.
-4. It exposes API endpoints for manual sync, status polling, and data retrieval.
-5. It uploads backup files (ODS files and `nav.json`) to the configured Google Drive backup folder.
+1. The backend traverses a configured Google Drive root folder (`ROOT_DRIVE_FOLDER`).
+2. It reads spreadsheet metadata from Drive/Sheets with retry mechanisms.
+3. It compiles a `nav.json`-style hierarchy tree and stores the latest version and sync logs in SQLite.
+4. It exposes authenticated API endpoints (`/api/*` protected via `x-api-key`) for manual sync, status polling, and data retrieval.
+5. It uploads backup files (`.ods` files and `nav.json`) to the configured Google Drive backup folder (`BACKUP_DRIVE_FOLDER`).
+
+---
 
 ## Repository Layout
 
@@ -323,32 +346,97 @@ Use this after setup or deployment:
 7. Confirm the SQLite database persists after a container restart.
 8. Confirm backup files (ODS and nav.json) are successfully copied to daily subfolders within your Google Drive backup folder.
 
-## Deployment With Portainer
+## 🚀 Deployment & Production Setup
 
-Use the existing root [`docker-compose.yml`](/home/abuhafi/Project/rapor/docker-compose.yml) as the deployment source. That is the correct- `build:` with local source directories
-- environment variables for all configuration
-- a bind mount for the root [`Caddyfile`](/home/abuhafi/Project/rapor/Caddyfile)
+### Historical Context & Architecture Evolution
 
-That means Portainer must deploy from a Docker host that has the full repository contents available. A copy-pasted stack in isolation is not enough unless you first convert the compose file to use pre-built images and absolute host paths.
+Originally, report synchronization and aggregation was performed via an **n8n automation workflow** with a separate static web viewer. The system was subsequently re-architected into a standalone monorepo consisting of:
+- A dedicated **Express.js API** replacing n8n, managing Google Drive/Sheets traversal, SQLite persistence, and `.ods` backups.
+- An **Astro + Alpine.js** frontend with DaisyUI providing both the student report viewer and a password-authenticated Admin Logs dashboard.
+- A **Caddy** reverse proxy container handling routing (`/api/*` to backend, all else to frontend) and automated TLS termination.
 
-### Recommended Portainer Workflow
+### Deployment with Docker Compose & Portainer
 
-1. Clone this repository onto the Docker host (e.g., `/opt/rapor`).
-2. Create `.env` from `.env.example` and fill in your environment variables, including the extracted Google keys (see **Credential Setup**).
-3. Ensure your DNS record already points the chosen domain to the server.
-4. In Portainer, create a new stack using the repository's `docker-compose.yml`.
-5. Deploy the stack.
-6. Check that `backend`, `frontend`, and `caddy` become healthy.
-7. Open `https://your-domain` and verify the frontend and `/api/*` routing.ile if your Portainer workflow manages them there instead.
-8. Deploy the stack.
-9. Check that `backend`, `frontend`, and `caddy` all become healthy.
-10. Open `https://your-domain` and verify both the frontend and `/api/*` routing.
+The primary production deployment model uses the root [docker-compose.yml](file:///home/abuhafi/Project/rapor/docker-compose.yml).
 
-### Portainer Notes
+```text
+                              [ Public Traffic ]
+                                      │
+                                      ▼
+                        ┌───────────────────────────┐
+                        │   Caddy (caddy:2-alpine)   │
+                        │     Ports :80 / :443      │
+                        │  (Automatic Let's Encrypt)│
+                        └─────────────┬─────────────┘
+                                      │
+                      ┌───────────────┴───────────────┐
+                      │  Docker Network: rapor-internal│
+                      ▼                               ▼
+       ┌───────────────────────────────┐  ┌───────────────────────────────┐
+       │   rapor-backend (Port 3000)   │  │   rapor-frontend (Port 4321)  │
+       │    Node.js / Express API      │  │        Astro SSR / Static     │
+       │  Volume: backend_data (SQLite)│  └───────────────────────────────┘
+       └───────────────────────────────┘
+```
 
-- If your Portainer installation cannot build images from this repository layout, build and push the frontend/backend images first, then replace `build:` with `image:` entries.
-- If bind mounts with relative paths do not work in your Portainer setup, switch them to absolute host paths.
-- Automatic HTTPS only works when `DOMAIN` is a real public domain resolving to the server and ports `80` and `443` are reachable.
+### Deployment with Portainer (Git Repository Stack)
+
+The production setup runs directly inside Portainer via a **Git Repository Stack** pulling from GitHub.
+
+```text
+       ┌────────────────────────┐
+       │   GitHub Repository    │
+       │ (decaller/rapor-sd...) │
+       └───────────┬────────────┘
+                   │ Git Pull / Webhook
+                   ▼
+       ┌─────────────────────────────────────────────────────────────┐
+       │                  Portainer Git Stack Host                   │
+       │                                                             │
+       │                      [ Public Traffic ]                     │
+       │                              │                              │
+       │                              ▼                              │
+       │                ┌───────────────────────────┐                │
+       │                │   Caddy (caddy:2-alpine)   │                │
+       │                │     Ports :80 / :443      │                │
+       │                │   (inputrapor.sd.insan...)│                │
+       │                └─────────────┬─────────────┘                │
+       │                              │                              │
+       │              ┌───────────────┴───────────────┐              │
+       │              │  Docker Network: rapor-internal│              │
+       │              ▼                               ▼              │
+       │┌───────────────────────────────┐ ┌─────────────────────────┐│
+       ││   rapor-backend (Port 3000)   │ │  rapor-frontend (4321)  ││
+       ││    Node.js / Express API      │ │    Astro SSR / Static   ││
+       ││  Volume: backend_data (SQLite)│ └─────────────────────────┘│
+       │└───────────────────────────────┘                            │
+       └─────────────────────────────────────────────────────────────┘
+```
+
+#### Portainer Git Stack Configuration:
+
+1. **Create Stack**: In Portainer, go to **Stacks** $\rightarrow$ **Add Stack**.
+2. **Select Build Method**: Choose **Repository**.
+3. **Repository Settings**:
+   - **Repository URL**: `https://github.com/decaller/rapor-sd-frontend-backend.git`
+   - **Repository reference**: `refs/heads/master`
+   - **Compose path**: `docker-compose.yml`
+4. **Environment Variables**: Add the variables in the Portainer Stack UI:
+   - `DOMAIN`: `inputrapor.sd.insantaqwa.org`
+   - `BEHIND_PROXY`: `true` (if behind Cloudflare / upstream reverse proxy) or `false`
+   - `BACKEND_PORT`: `3000`
+   - `HTTP_PORT`: `80` / `HTTPS_PORT`: `443`
+   - `API_SECRET_KEY` & `ADMIN_PASSWORD_HASH`
+   - `ROOT_DRIVE_FOLDER` & `BACKUP_DRIVE_FOLDER`
+   - `GCP_PROJECT_ID`, `GCP_CLIENT_EMAIL`, and `GCP_PRIVATE_KEY`
+5. **Deploy the Stack**: Click **Deploy the stack**.
+
+#### How to Update / Redeploy:
+Whenever changes are pushed to GitHub `master`:
+1. Open the **Rapor Stack** in Portainer.
+2. Click **"Update the stack"** / **"Pull and redeploy"**.
+3. Enable **"Re-pull image and redeploy"** (forces Docker Compose build step) and click **Update**.
+4. Portainer pulls the latest commit, builds the containers, and performs a zero-downtime rolling restart.
 
 ## Operational Notes
 

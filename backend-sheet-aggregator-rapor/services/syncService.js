@@ -114,6 +114,42 @@ async function buildMapelNode(spreadsheetFile) {
 }
 
 // -----------------------------------------------------------------------
+//  buildAdministrasiNode
+//  Turns one class administration spreadsheet ("Administrasi Guru Kelas 1A")
+//  into a nav node listing all administrative sheets in order.
+// -----------------------------------------------------------------------
+async function buildAdministrasiNode(spreadsheetFile) {
+    const gsheetId = spreadsheetFile.id;
+
+    // "Administrasi Guru Kelas 1A" / "Administrasi Kelas 1A" → "Kelas 1A"
+    const label = spreadsheetFile.name
+        .replace(/^Administrasi\s+Guru\s+/i, '')
+        .replace(/^Administrasi\s+/i, '')
+        .replace(/^Nilai\s+/i, '')
+        .trim();
+
+    const kelasNode = { label, children: [] };
+    const sheetsData = await getSpreadsheetMetadata(gsheetId);
+
+    for (const sheet of sheetsData) {
+        const sheetName = sheet.title;
+        const lower     = sheetName.toLowerCase().trim();
+
+        // Skip setup or internal configuration sheets
+        if (lower === 'setup' || lower === 'config' || lower.startsWith('_')) {
+            continue;
+        }
+
+        const gid      = sheet.sheetId;
+        const valueObj = JSON.stringify({ gsheetId, gid });
+        kelasNode.children.push({ label: sheetName, value: valueObj });
+    }
+
+    return kelasNode;
+}
+
+
+// -----------------------------------------------------------------------
 //  buildEkskulNodes
 //  Reads one Ekskul spreadsheet and builds the Kelas > SubKelas tree.
 //
@@ -255,18 +291,97 @@ async function runSync() {
         for (const ta of tahunAjaranFolders) {
             if (ta.mimeType !== 'application/vnd.google-apps.folder') continue;
 
-            const semesterFolders = await getFolderContents(ta.id);
+            const taContents = await getFolderContents(ta.id);
+
+            // ── 1. Check for standalone spreadsheets directly in Tahun Ajaran folder ──
+            const standaloneSpreadsheets = [];
+            for (const item of taContents) {
+                if (item.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                    standaloneSpreadsheets.push({
+                        label: item.name,
+                        value: JSON.stringify({ gsheetId: item.id, gid: 0 })
+                    });
+                    processedSheets.push({ id: item.id, name: item.name });
+                }
+            }
+
+            // ── 2. Process Administrasi folder if present ──────────────────────────────
+            const adminFolder = taContents.find(item => 
+                item.mimeType === 'application/vnd.google-apps.folder' &&
+                item.name.toLowerCase().includes('administrasi')
+            );
+
+            if (adminFolder) {
+                await addLog('PROCESS_ADMINISTRASI', 'PENDING',
+                    `Processing Administrasi folder in ${ta.name}...`);
+                
+                const adminContents = await getFolderContents(adminFolder.id);
+
+                const administrasiData = {
+                    tahunAjaran: ta.name,
+                    semester:    0,
+                    type:        'administrasi',
+                    label:       'Administrasi (1 Tahun)',
+                    data: { dataMapel: [], dataEkskul: [], dataStandalone: [...standaloneSpreadsheets] },
+                };
+
+                for (const item of adminContents) {
+                    if (item.mimeType === 'application/vnd.google-apps.folder') {
+                        // Grade folder, e.g. "Kelas 1"
+                        const classFiles = await getFolderContents(item.id);
+                        classFiles.sort((a, b) => a.name.localeCompare(b.name));
+
+                        for (const cf of classFiles) {
+                            if (cf.mimeType !== 'application/vnd.google-apps.spreadsheet') continue;
+
+                            processedSheets.push({ id: cf.id, name: cf.name });
+                            try {
+                                administrasiData.data.dataMapel.push(await buildAdministrasiNode(cf));
+                                await addLog('PROCESS_ADMINISTRASI_SUCCESS', 'SUCCESS', `Successfully read Administrasi "${cf.name}"`);
+                            } catch (e) {
+                                console.error(`❌ Administrasi "${cf.name}" failed:`, e.message);
+                                await addLog('PROCESS_ADMINISTRASI_ERROR', 'ERROR', `Failed reading Administrasi "${cf.name}": ${e.message}`);
+                                throw e;
+                            }
+                        }
+                    } else if (item.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                        processedSheets.push({ id: item.id, name: item.name });
+                        try {
+                            administrasiData.data.dataMapel.push(await buildAdministrasiNode(item));
+                            await addLog('PROCESS_ADMINISTRASI_SUCCESS', 'SUCCESS', `Successfully read Administrasi "${item.name}"`);
+                        } catch (e) {
+                            console.error(`❌ Administrasi "${item.name}" failed:`, e.message);
+                            await addLog('PROCESS_ADMINISTRASI_ERROR', 'ERROR', `Failed reading Administrasi "${item.name}": ${e.message}`);
+                            throw e;
+                        }
+                    }
+                }
+
+                // Sort classes in Administrasi
+                administrasiData.data.dataMapel.sort((a, b) =>
+                    a.label.localeCompare(b.label, 'id', { numeric: true })
+                );
+
+                finalData.push(administrasiData);
+            }
+
+            // ── 3. Process Semester folders (Semester 1, Semester 2) ───────────────────
+            const semesterFolders = taContents.filter(item =>
+                item.mimeType === 'application/vnd.google-apps.folder' &&
+                !item.name.toLowerCase().includes('administrasi')
+            );
+            semesterFolders.sort((a, b) => a.name.localeCompare(b.name));
 
             for (const sem of semesterFolders) {
-                if (sem.mimeType !== 'application/vnd.google-apps.folder') continue;
-
                 const semMatch    = sem.name.match(/\d+/);
                 const semesterNum = semMatch ? parseInt(semMatch[0], 10) : 1;
 
                 const semesterData = {
                     tahunAjaran: ta.name,
                     semester:    semesterNum,
-                    data: { dataMapel: [], dataEkskul: [] },
+                    type:        'semester',
+                    label:       `Semester ${semesterNum}`,
+                    data: { dataMapel: [], dataEkskul: [], dataStandalone: [...standaloneSpreadsheets] },
                 };
 
                 const semesterContents = await getFolderContents(sem.id);
