@@ -86,12 +86,44 @@ async function updateRun(id, status, logs, apiData = null, endTime = null, durat
     );
 }
 
-async function getAllRuns() {
+async function getRunsCount() {
+    if (!db) return 0;
+    const row = await db.get(`SELECT COUNT(*) as count FROM sync_runs`);
+    return row ? row.count : 0;
+}
+
+async function getRunById(id) {
+    if (!db) return null;
+    const row = await db.get(`SELECT * FROM sync_runs WHERE id = ?`, [id]);
+    if (!row) return null;
+    try { row.logs = row.logs ? JSON.parse(row.logs) : []; } catch(e) { row.logs = []; }
+    try { row.api_data = row.api_data ? JSON.parse(row.api_data) : null; } catch(e) { row.api_data = null; }
+    row.has_api_data = Boolean(row.api_data);
+    return row;
+}
+
+async function getAllRuns({ limit = 5, offset = 0, includeApiData = false } = {}) {
     if (!db) return [];
-    const rows = await db.all(`SELECT * FROM sync_runs ORDER BY id DESC LIMIT 50`);
+    const parsedLimit = Math.max(1, parseInt(limit, 10) || 5);
+    const parsedOffset = Math.max(0, parseInt(offset, 10) || 0);
+
+    const selectCols = includeApiData
+        ? `id, status, start_time, end_time, duration_ms, logs, api_data, (api_data IS NOT NULL AND length(api_data) > 0) AS has_api_data`
+        : `id, status, start_time, end_time, duration_ms, logs, NULL AS api_data, (api_data IS NOT NULL AND length(api_data) > 0) AS has_api_data`;
+
+    const rows = await db.all(
+        `SELECT ${selectCols} FROM sync_runs ORDER BY id DESC LIMIT ? OFFSET ?`,
+        [parsedLimit, parsedOffset]
+    );
+
     return rows.map(row => {
         try { row.logs = row.logs ? JSON.parse(row.logs) : []; } catch(e) { row.logs = []; }
-        try { row.api_data = row.api_data ? JSON.parse(row.api_data) : null; } catch(e) { row.api_data = null; }
+        if (includeApiData && row.api_data) {
+            try { row.api_data = JSON.parse(row.api_data); } catch(e) { row.api_data = null; }
+        } else {
+            row.api_data = null;
+        }
+        row.has_api_data = Boolean(row.has_api_data);
         return row;
     });
 }
@@ -126,5 +158,7 @@ module.exports = {
     getLatestNavTree,
     startRun,
     updateRun,
-    getAllRuns
+    getAllRuns,
+    getRunsCount,
+    getRunById
 };

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
-const { clearLogs, getLogs, getLatestNavTree, getAllRuns } = require('../database');
+const { clearLogs, getLogs, getLatestNavTree, getAllRuns, getRunsCount, getRunById } = require('../database');
 const { runSync } = require('../services/syncService');
 
 // ─── Rate Limiters ──────────────────────────────────────────────────────────
@@ -67,14 +67,47 @@ router.get('/data', async (req, res) => {
     }
 });
 
-// Get real-time status of the currently running sync process
-router.get('/status', async (req, res) => {
+// Get real-time status of the currently running sync process with pagination & lazy loading
+router.get('/status', generalLimiter, async (req, res) => {
     try {
-        const runs = await getAllRuns();
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 50);
+        const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+        const includeApiData = req.query.include_api_data === 'true';
+
+        const [runs, total] = await Promise.all([
+            getAllRuns({ limit, offset, includeApiData }),
+            getRunsCount()
+        ]);
+
+        const hasMore = offset + runs.length < total;
+        res.set('X-Total-Count', String(total));
+        res.set('X-Has-More', String(hasMore));
+
+        if (req.query.format === 'paginated') {
+            return res.status(200).json({ runs, total, hasMore, limit, offset });
+        }
+
+        // Return array of runs for default backwards-compatibility
         res.status(200).json(runs);
     } catch (err) {
         console.error("Failed to fetch logs:", err);
         res.status(500).json({ error: "Failed to fetch status logs." });
+    }
+});
+
+// Get a single run's full details (including heavy api_data) on demand
+router.get('/runs/:id', generalLimiter, async (req, res) => {
+    try {
+        const runId = parseInt(req.params.id, 10);
+        if (!runId) return res.status(400).json({ error: "Invalid run ID." });
+
+        const run = await getRunById(runId);
+        if (!run) return res.status(404).json({ error: "Run not found." });
+
+        res.status(200).json(run);
+    } catch (err) {
+        console.error("Failed to fetch run:", err);
+        res.status(500).json({ error: "Failed to fetch run details." });
     }
 });
 

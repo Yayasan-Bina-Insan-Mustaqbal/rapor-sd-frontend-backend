@@ -60,11 +60,11 @@ const requireApiKey = (req, res, next) => {
 };
 
 // ─── Rate Limiter ────────────────────────────────────────────────────────────
-// Limits each IP to 100 requests per 15 minutes on all /api routes.
-// This prevents brute-force attacks against the auth middleware.
+// Limits each IP to 1000 requests per 15 minutes on all /api routes.
+// This prevents brute-force attacks while allowing smooth admin status monitoring.
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100,
+    max: 1000,
     standardHeaders: 'draft-8',
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later.' },

@@ -17,11 +17,29 @@
       </div>
       <div class="flex flex-col">
         <span class="text-xs uppercase tracking-widest text-base-content/50 font-bold">Sync Status</span>
-        <span x-show="!isRateLimited" class="text-sm font-medium" :class="isSyncing ? 'text-primary' : 'text-base-content/70'" x-text="isSyncing ? 'Synchronizing...' : 'Idle'"></span>
-        <span x-show="isRateLimited" class="badge badge-error badge-sm">Rate Limited</span>
+        <div class="flex items-center gap-2">
+          <span x-show="!isRateLimited" class="text-sm font-medium" :class="isSyncing ? 'text-primary font-bold' : 'text-base-content/70'" x-text="isSyncing ? 'Synchronizing (Live)...' : 'Idle'"></span>
+          <span x-show="isRateLimited" class="badge badge-error badge-sm">Rate Limited</span>
+          <span x-show="isSyncing" class="loading loading-spinner loading-xs text-primary"></span>
+        </div>
       </div>
     </div>
+    
     <div class="flex items-center gap-2">
+      <!-- Manual Refresh Button -->
+      <button 
+        @click="manualRefresh" 
+        :disabled="isFetching"
+        class="btn btn-sm btn-ghost gap-1.5 text-base-content/70 hover:text-base-content"
+        title="Segarkan data sekarang"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="isFetching ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5m-5-2a9 9 0 112.55 12.08" />
+        </svg>
+        <span class="hidden sm:inline text-xs font-mono">Segarkan</span>
+      </button>
+
+      <!-- Trigger Force Sync Button -->
       <button 
         @click="triggerSync" 
         :disabled="isSyncing || isRateLimited"
@@ -58,27 +76,37 @@
     </div>
   </div>
 
-  <!-- Log Container -->
+  <!-- Log Container (Lazy Loaded List) -->
   <div class="space-y-3 overflow-y-auto pr-2 custom-scrollbar" style="max-height: calc(100vh - 320px);">
+    <!-- Initial Loading State -->
+    <div x-show="initialLoading" class="flex flex-col items-center justify-center py-12 text-base-content/50 gap-3">
+      <span class="loading loading-spinner loading-md text-primary"></span>
+      <span class="text-xs font-mono">Memuat riwayat sinkronisasi...</span>
+    </div>
+
     <!-- Empty State -->
-    <div x-show="runs.length === 0" class="text-base-content/50 italic py-10 text-center" style="display: none;">
+    <div x-show="!initialLoading && runs.length === 0" class="text-base-content/50 italic py-10 text-center" style="display: none;">
       // No sync runs found.
     </div>
     
-    <!-- Loop through runs -->
+    <!-- Loop through runs (with content-visibility for ultra fast rendering) -->
     <template x-for="(run, index) in runs" :key="run.id">
-      <div class="collapse collapse-plus border transition-all" 
-           :class="[getBorderClass(run.status), expanded === run.id ? 'collapse-open bg-base-200 shadow-md' : 'collapse-close bg-base-100 opacity-90 hover:bg-base-200/50']">
-        
+      <div 
+        class="collapse collapse-plus border transition-all sync-run-card" 
+        :class="[getBorderClass(run.status), expanded === run.id ? 'collapse-open bg-base-200 shadow-md' : 'collapse-close bg-base-100 opacity-90 hover:bg-base-200/50']"
+      >
         <!-- Accordion Header -->
         <div 
-          @click="toggle(run.id)" 
-          class="collapse-title flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 font-mono py-3 min-h-0"
+          @click="toggle(run)" 
+          class="collapse-title flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 font-mono py-3 min-h-0 cursor-pointer"
         >
-          <div class="flex items-center gap-4">
-            <div class="badge font-bold shrink-0 shadow-sm" :class="getBadgeClass(run.status)" x-text="run.status"></div>
+          <div class="flex items-center gap-3">
+            <div class="badge font-bold shrink-0 shadow-xs" :class="getBadgeClass(run.status)" x-text="run.status"></div>
             <span class="text-base-content/80 text-sm font-medium" x-text="formatTime(run.start_time)"></span>
             <span class="text-base-content/50 text-xs" x-show="run.duration_ms !== null" x-text="`(${(run.duration_ms / 1000).toFixed(1)}s)`"></span>
+          </div>
+          <div class="sm:ml-auto text-xs text-base-content/40 font-mono">
+            <span x-text="`${run.logs ? run.logs.length : 0} steps`"></span>
           </div>
         </div>
 
@@ -86,12 +114,16 @@
         <div class="collapse-content font-mono text-sm">
           <!-- Logs List -->
           <div class="bg-base-300 rounded-box p-4 mt-2">
-            <h3 class="text-base-content/50 uppercase tracking-widest text-xs mb-3 font-semibold"># Execution Logs</h3>
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-base-content/50 uppercase tracking-widest text-xs font-semibold"># Execution Logs</h3>
+              <span class="text-xs text-base-content/40 font-mono" x-text="`${run.logs ? run.logs.length : 0} log entries`"></span>
+            </div>
+
             <div x-show="(!run.logs || run.logs.length === 0)" class="text-base-content/40 italic mb-4">// No detailed logs.</div>
-            <div class="space-y-1 mb-6 text-xs sm:text-sm">
-              <template x-for="log in run.logs" :key="Math.random()">
+            <div class="space-y-1 mb-6 text-xs sm:text-sm max-h-96 overflow-y-auto custom-scrollbar pr-1">
+              <template x-for="(log, logIdx) in run.logs" :key="logIdx">
                 <div class="py-1.5 flex items-start gap-3 pl-2 transition-colors hover:bg-base-content/5 rounded">
-                  <span class="text-base-content/40 shrink-0 select-none" x-text="formatTimeOnly(log.timestamp)"></span>
+                  <span class="text-base-content/40 shrink-0 select-none text-[11px]" x-text="formatTimeOnly(log.timestamp)"></span>
                   <span class="font-bold shrink-0 min-w-[70px] sm:min-w-[80px]" :class="getTextColor(log.status)" x-text="`[${log.status}]` "></span>
                   <div class="flex-1 min-w-0">
                     <span class="text-info font-medium" x-text="log.step_name"></span>
@@ -102,19 +134,66 @@
               </template>
             </div>
             
-            <!-- API Data Payload -->
-            <div x-show="run.api_data">
-               <h3 class="text-base-content/50 uppercase tracking-widest text-xs mb-3 border-t border-base-content/10 pt-4 font-semibold"># Internal API Mapping Data payload</h3>
-               <textarea readonly class="w-full h-48 bg-base-100 text-base-content/80 border border-base-content/10 rounded-lg p-3 font-mono text-xs focus:outline-none custom-scrollbar shadow-inner" x-text="JSON.stringify(run.api_data, null, 2)"></textarea>
+            <!-- API Data Payload (Lazy loaded on demand) -->
+            <div x-show="run.has_api_data || run.api_data" class="border-t border-base-content/10 pt-4">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-base-content/50 uppercase tracking-widest text-xs font-semibold"># Internal API Mapping Data payload</h3>
+                <button 
+                  x-show="!run.api_data && !run.loadingApiData" 
+                  @click.stop="loadRunApiData(run)" 
+                  type="button"
+                  class="btn btn-xs btn-outline font-mono text-[11px] gap-1"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  Muat Payload JSON
+                </button>
+                <span x-show="run.loadingApiData" class="flex items-center gap-1.5 text-xs text-primary font-mono">
+                  <span class="loading loading-spinner loading-xs"></span> Mengunduh payload...
+                </span>
+              </div>
+
+              <div x-show="run.api_data" class="mt-2">
+                <textarea 
+                  readonly 
+                  class="w-full h-48 bg-base-100 text-base-content/80 border border-base-content/10 rounded-lg p-3 font-mono text-xs focus:outline-none custom-scrollbar shadow-inner" 
+                  x-text="typeof run.api_data === 'string' ? run.api_data : JSON.stringify(run.api_data, null, 2)"
+                ></textarea>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </template>
+
+    <!-- Lazy Loading / Load More Controls -->
+    <div x-show="!initialLoading && runs.length > 0" class="pt-4 pb-2 text-center border-t border-base-content/5 mt-4">
+      <div class="flex flex-col items-center gap-2">
+        <button 
+          x-show="hasMore" 
+          @click="loadMoreRuns" 
+          :disabled="isLoadingMore"
+          class="btn btn-sm btn-outline gap-2 font-mono text-xs hover:border-primary hover:text-primary transition-colors"
+        >
+          <span x-show="isLoadingMore" class="loading loading-spinner loading-xs"></span>
+          <svg x-show="!isLoadingMore" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+          <span x-text="isLoadingMore ? 'Memuat riwayat...' : 'Muat Lebih Banyak Riwayat'"></span>
+        </button>
+
+        <span class="text-xs text-base-content/40 font-mono">
+          <span x-text="`Menampilkan ${runs.length} dari ${totalRuns || runs.length} riwayat sinkronisasi`"></span>
+          <span x-show="!hasMore && runs.length > 0" class="text-success/70 font-semibold ml-1">• Semua riwayat termuat</span>
+        </span>
+      </div>
+    </div>
   </div>
 </div>
 
-  <style>
+<style>
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
@@ -128,17 +207,29 @@
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: color-mix(in srgb, currentColor 30%, transparent);
   }
+
+  /* Optimize offscreen run cards */
+  .sync-run-card {
+    content-visibility: auto;
+    contain-intrinsic-size: 0 62px;
+  }
 </style>
 
 <script is:inline>
   document.addEventListener('alpine:init', () => {
     Alpine.data('logViewerComponent', () => ({
       runs: [],
+      totalRuns: 0,
+      hasMore: false,
+      initialLoading: true,
+      isFetching: false,
+      isLoadingMore: false,
       expanded: null,
-      pollingInterval: null,
+      pollingTimer: null,
       isRateLimited: false,
+      pageSize: 5, // Handful of recent syncs
       
-      // New state variables for the sync command's API response
+      // State for sync command response
       syncReturnData: null,
       showSyncCollapse: false,
       syncStatusOk: true,
@@ -148,54 +239,231 @@
       },
 
       init() {
-        this.fetchLogs();
-        this.pollingInterval = setInterval(() => this.fetchLogs(), 2000);
+        this.fetchInitialRuns();
+        this.setupAdaptivePolling();
+        
+        // Pause polling when browser tab is inactive to save bandwidth
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) {
+            this.clearPolling();
+          } else {
+            this.fetchRecentOnly();
+            this.setupAdaptivePolling();
+          }
+        });
       },
 
       destroy() {
-        clearInterval(this.pollingInterval);
+        this.clearPolling();
       },
 
-      async fetchLogs() {
+      clearPolling() {
+        if (this.pollingTimer) {
+          clearTimeout(this.pollingTimer);
+          this.pollingTimer = null;
+        }
+      },
+
+      setupAdaptivePolling() {
+        this.clearPolling();
+        // 2500ms when actively syncing, 15000ms when idle
+        const interval = this.isSyncing ? 2500 : 15000;
+        this.pollingTimer = setTimeout(async () => {
+          if (!document.hidden) {
+            await this.fetchRecentOnly();
+          }
+          this.setupAdaptivePolling();
+        }, interval);
+      },
+
+      async manualRefresh() {
+        this.isFetching = true;
+        await this.fetchRecentOnly();
+        this.isFetching = false;
+        this.setupAdaptivePolling();
+      },
+
+      // Fetch first page (recent handful)
+      async fetchInitialRuns() {
+        this.initialLoading = true;
         const password = sessionStorage.getItem('app_password');
-        if (!password) return;
+        if (!password) {
+          this.initialLoading = false;
+          return;
+        }
 
         try {
-          const res = await fetch('/api/rapor/status', {
+          const res = await fetch(`/api/rapor/status?limit=${this.pageSize}&offset=0&format=paginated`, {
             headers: { 'x-admin-password': password }
           });
           
           if (res.status === 403) {
-             sessionStorage.removeItem('app_password');
-             clearInterval(this.pollingInterval);
-             alert("Invalid admin password. Please refresh the page to try again.");
-             document.body.innerHTML = '<div style="color:white;text-align:center;margin-top:50px;">Access denied. Refresh to try again.</div>';
-             return;
+            this.handleUnauthorized();
+            return;
           }
 
           if (res.status === 429) {
             this.isRateLimited = true;
           } else if (res.ok) {
             this.isRateLimited = false;
-            const fetchedRuns = await res.json();
-            this.runs = fetchedRuns;
+            const data = await res.json();
             
-            // Auto expand the first one if it's currently running and nothing is expanded
+            if (data && Array.isArray(data.runs)) {
+              this.runs = data.runs;
+              this.totalRuns = data.total || data.runs.length;
+              this.hasMore = data.hasMore;
+            } else if (Array.isArray(data)) {
+              this.runs = data;
+              this.totalRuns = data.length;
+              this.hasMore = false;
+            }
+
+            // Auto-expand if currently running
             if (this.expanded === null && this.runs.length > 0 && this.runs[0].status === 'PENDING') {
-                this.expanded = this.runs[0].id;
+              this.expanded = this.runs[0].id;
             }
           }
         } catch (err) {
-          console.error("Log fetch error:", err);
+          console.error("Initial log fetch error:", err);
+        } finally {
+          this.initialLoading = false;
         }
       },
 
-      toggle(id) {
-        if (this.expanded === id) {
-           this.expanded = null;
-        } else {
-           this.expanded = id;
+      // Lightweight poll: updates only the first page (recent syncs) without wiping loaded history
+      async fetchRecentOnly() {
+        const password = sessionStorage.getItem('app_password');
+        if (!password) return;
+
+        try {
+          const res = await fetch(`/api/rapor/status?limit=${this.pageSize}&offset=0&format=paginated`, {
+            headers: { 'x-admin-password': password }
+          });
+          
+          if (res.status === 403) {
+            this.handleUnauthorized();
+            return;
+          }
+
+          if (res.status === 429) {
+            this.isRateLimited = true;
+          } else if (res.ok) {
+            this.isRateLimited = false;
+            const data = await res.json();
+            const freshRuns = (data && Array.isArray(data.runs)) ? data.runs : (Array.isArray(data) ? data : []);
+            
+            if (data && typeof data.total === 'number') {
+              this.totalRuns = data.total;
+            }
+
+            if (freshRuns.length > 0) {
+              // Merge fresh runs into existing runs list
+              const existingOlderRuns = this.runs.slice(this.pageSize);
+              
+              // Preserve any already loaded api_data in the fresh runs
+              freshRuns.forEach(freshRun => {
+                const existing = this.runs.find(r => r.id === freshRun.id);
+                if (existing && existing.api_data) {
+                  freshRun.api_data = existing.api_data;
+                }
+              });
+
+              this.runs = [...freshRuns, ...existingOlderRuns];
+              this.hasMore = this.runs.length < this.totalRuns;
+
+              // Auto-expand if first run is actively running
+              if (this.expanded === null && this.runs[0].status === 'PENDING') {
+                this.expanded = this.runs[0].id;
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Recent log fetch error:", err);
         }
+      },
+
+      // Lazy load next batch of runs
+      async loadMoreRuns() {
+        if (this.isLoadingMore || !this.hasMore) return;
+        this.isLoadingMore = true;
+
+        const password = sessionStorage.getItem('app_password');
+        if (!password) {
+          this.isLoadingMore = false;
+          return;
+        }
+
+        try {
+          const offset = this.runs.length;
+          const res = await fetch(`/api/rapor/status?limit=${this.pageSize}&offset=${offset}&format=paginated`, {
+            headers: { 'x-admin-password': password }
+          });
+
+          if (res.status === 403) {
+            this.handleUnauthorized();
+            return;
+          }
+
+          if (res.ok) {
+            const data = await res.json();
+            const newRuns = (data && Array.isArray(data.runs)) ? data.runs : (Array.isArray(data) ? data : []);
+            
+            if (data && typeof data.total === 'number') {
+              this.totalRuns = data.total;
+            }
+
+            if (newRuns.length > 0) {
+              this.runs = [...this.runs, ...newRuns];
+            }
+            this.hasMore = typeof data.hasMore === 'boolean' ? data.hasMore : (this.runs.length < this.totalRuns);
+          }
+        } catch (err) {
+          console.error("Load more runs error:", err);
+        } finally {
+          this.isLoadingMore = false;
+        }
+      },
+
+      // Lazy load heavy JSON API payload for a specific run on demand
+      async loadRunApiData(run) {
+        if (run.api_data || run.loadingApiData) return;
+        run.loadingApiData = true;
+
+        const password = sessionStorage.getItem('app_password');
+        if (!password) {
+          run.loadingApiData = false;
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/rapor/runs/${run.id}`, {
+            headers: { 'x-admin-password': password }
+          });
+
+          if (res.ok) {
+            const fullRun = await res.json();
+            run.api_data = fullRun.api_data || { message: "No API data recorded for this run." };
+          }
+        } catch (err) {
+          console.error("Error loading run API data:", err);
+        } finally {
+          run.loadingApiData = false;
+        }
+      },
+
+      toggle(run) {
+        if (this.expanded === run.id) {
+          this.expanded = null;
+        } else {
+          this.expanded = run.id;
+        }
+      },
+
+      handleUnauthorized() {
+        sessionStorage.removeItem('app_password');
+        this.clearPolling();
+        alert("Invalid admin password. Please refresh the page to try again.");
+        document.body.innerHTML = '<div style="color:white;text-align:center;margin-top:50px;">Access denied. Refresh to try again.</div>';
       },
 
       async triggerSync() {
@@ -208,52 +476,50 @@
         if (!password) return;
 
         try {
-           const res = await fetch('/api/rapor/sync', { 
-             method: 'POST',
-             headers: { 'x-admin-password': password }
-           });
-           
-           if (res.status === 403) {
-             sessionStorage.removeItem('app_password');
-             clearInterval(this.pollingInterval);
-             alert("Invalid admin password. Please refresh the page to try again.");
-             document.body.innerHTML = '<div style="color:white;text-align:center;margin-top:50px;">Access denied. Refresh to try again.</div>';
-             return;
-           }
+          const res = await fetch('/api/rapor/sync', { 
+            method: 'POST',
+            headers: { 'x-admin-password': password }
+          });
+          
+          if (res.status === 403) {
+            this.handleUnauthorized();
+            return;
+          }
 
-           if (res.status === 429) {
-             this.isRateLimited = true;
-             let errorData = "Rate limited. Please try again soon.";
-             try { errorData = await res.json(); } catch(e) {}
-             this.syncReturnData = errorData;
-             this.syncStatusOk = false;
-             this.showSyncCollapse = true;
-           } else if (res.ok) {
-             let data = { message: "Sync triggered successfully." };
-             try { data = await res.json(); } catch(e) {}
-             this.syncReturnData = data;
-             this.syncStatusOk = true;
-             this.showSyncCollapse = true;
-             
-             this.expanded = null; // reset to allow auto-expand inside fetchLogs
-             this.fetchLogs();
-             
-             // Expand the latest soon
-             setTimeout(() => {
-                 if (this.runs.length > 0) this.expanded = this.runs[0].id;
-             }, 500);
-           } else {
-             let data = { error: "Failed to trigger sync: " + res.statusText };
-             try { data = await res.json(); } catch(e) {}
-             this.syncReturnData = data;
-             this.syncStatusOk = false;
-             this.showSyncCollapse = true;
-           }
+          if (res.status === 429) {
+            this.isRateLimited = true;
+            let errorData = "Rate limited. Please wait before triggering another sync.";
+            try { errorData = await res.json(); } catch(e) {}
+            this.syncReturnData = errorData;
+            this.syncStatusOk = false;
+            this.showSyncCollapse = true;
+          } else if (res.ok) {
+            let data = { message: "Sync process started in the background." };
+            try { data = await res.json(); } catch(e) {}
+            this.syncReturnData = data;
+            this.syncStatusOk = true;
+            this.showSyncCollapse = true;
+            
+            // Immediately refresh and trigger fast polling
+            this.expanded = null;
+            await this.fetchRecentOnly();
+            this.setupAdaptivePolling();
+            
+            setTimeout(() => {
+              if (this.runs.length > 0) this.expanded = this.runs[0].id;
+            }, 400);
+          } else {
+            let data = { error: "Failed to trigger sync: " + res.statusText };
+            try { data = await res.json(); } catch(e) {}
+            this.syncReturnData = data;
+            this.syncStatusOk = false;
+            this.showSyncCollapse = true;
+          }
         } catch(e) {
-           console.error("Sync error:", e);
-           this.syncReturnData = { error: "Error triggering sync: " + e.message };
-           this.syncStatusOk = false;
-           this.showSyncCollapse = true;
+          console.error("Sync error:", e);
+          this.syncReturnData = { error: "Error triggering sync: " + e.message };
+          this.syncStatusOk = false;
+          this.showSyncCollapse = true;
         }
       },
 
