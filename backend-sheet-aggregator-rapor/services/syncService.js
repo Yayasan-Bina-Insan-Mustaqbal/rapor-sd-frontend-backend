@@ -78,6 +78,8 @@ async function buildMapelNode(spreadsheetFile) {
     const sheetsData = await getSpreadsheetMetadata(gsheetId);
 
     for (const sheet of sheetsData) {
+        if (sheet.hidden) continue;
+
         const sheetName = sheet.title;
         const gid       = sheet.sheetId;
         const valueObj  = JSON.stringify({ gsheetId, gid });
@@ -132,6 +134,8 @@ async function buildAdministrasiNode(spreadsheetFile) {
     const sheetsData = await getSpreadsheetMetadata(gsheetId);
 
     for (const sheet of sheetsData) {
+        if (sheet.hidden) continue;
+
         const sheetName = sheet.title;
         const lower     = sheetName.toLowerCase().trim();
 
