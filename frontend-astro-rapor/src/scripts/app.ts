@@ -16,8 +16,55 @@ document.addEventListener('alpine:init', () => {
     toastMessage: '',
     showRefreshToast: false,
     showSemesterModal: false,
-    periodData: [],
+    periodData: [] as any[],
+    selectedPeriod: null as any,
     navHtml: '',
+
+    get activeYear(): string {
+      if (!this.periodData || this.periodData.length === 0) return '';
+      const years = Array.from(new Set(this.periodData.map((p: any) => p.tahunAjaran)));
+      years.sort((a, b) => {
+        const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
+        const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
+        return numB - numA;
+      });
+      return years[0] || '';
+    },
+
+    get activePeriods(): any[] {
+      const year = this.activeYear;
+      if (!year) return this.periodData;
+      return this.periodData.filter((p: any) => p.tahunAjaran === year);
+    },
+
+    get archivePeriods(): any[] {
+      const year = this.activeYear;
+      if (!year) return [];
+      return this.periodData.filter((p: any) => p.tahunAjaran !== year);
+    },
+
+    formatArchiveChipLabel(entry: any): string {
+      const shortYear = (entry.tahunAjaran || '').replace(/20(\d{2})\/20(\d{2})/, '$1/$2');
+      if (entry.type === 'administrasi' || entry.semester === 0) {
+        return `${shortYear} Admin`;
+      }
+      if (entry.type === 'btq') {
+        return `${shortYear} BTQ Sem ${entry.semester}`;
+      }
+      return `${shortYear} Sem ${entry.semester}`;
+    },
+
+    getPeriodBadgeText(): string {
+      if (!this.selectedPeriod) return '';
+      const p = this.selectedPeriod;
+      if (p.type === 'btq') {
+        return `BTQ Sem ${p.semester} • ${p.tahunAjaran}`;
+      }
+      if (p.type === 'administrasi' || p.semester === 0) {
+        return `Administrasi • ${p.tahunAjaran}`;
+      }
+      return `Nilai Sem ${p.semester} • ${p.tahunAjaran}`;
+    },
 
     initApp(navJsonUrl: string) {
       if (!navJsonUrl) navJsonUrl = '/nav.json';
@@ -47,7 +94,7 @@ document.addEventListener('alpine:init', () => {
 
         if (this.periodData.length === 1) {
           // Only one period, skip modal
-          this.buildNavigation(this.periodData[0]);
+          this.selectPeriod(this.periodData[0]);
         } else {
           // Show selection modal
           this.showSemesterModal = true;
@@ -61,6 +108,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     selectPeriod(period: any) {
+      this.selectedPeriod = period;
       this.showSemesterModal = false;
       this.buildNavigation(period);
     },

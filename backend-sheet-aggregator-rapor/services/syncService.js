@@ -148,6 +148,65 @@ async function buildAdministrasiNode(spreadsheetFile) {
     return kelasNode;
 }
 
+// -----------------------------------------------------------------------
+//  buildBtqNode
+//  Turns one class BTQ spreadsheet ("Rapot BTQ kelas 1A" / "Nilai BTQ Kelas 1A")
+//  into a nav node listing all evaluation and report sheets in order.
+// -----------------------------------------------------------------------
+async function buildBtqNode(spreadsheetFile) {
+    const gsheetId = spreadsheetFile.id;
+
+    // Normalise "Rapot BTQ kelas 1A" / "Nilai BTQ Kelas 1A" → "Kelas 1A"
+    let label = spreadsheetFile.name
+        .replace(/^Rapo[rt]\s+BTQ\s+/i, '')
+        .replace(/^Nilai\s+BTQ\s+/i, '')
+        .replace(/^BTQ\s+/i, '')
+        .replace(/^Nilai\s+/i, '')
+        .trim();
+
+    if (!label.toLowerCase().startsWith('kelas')) {
+        label = `Kelas ${label}`;
+    } else {
+        label = label.replace(/^kelas\s*/i, 'Kelas ');
+    }
+
+    const kelasNode = { label, children: [] };
+    const tabChildren   = [];
+    const rekapChildren = [];
+    const cetakChildren = [];
+
+    const sheetsData = await getSpreadsheetMetadata(gsheetId);
+
+    for (const sheet of sheetsData) {
+        // Skip hidden sheets
+        if (sheet.hidden) continue;
+
+        const sheetName = sheet.title.trim();
+        const gid       = sheet.sheetId;
+        const valueObj  = JSON.stringify({ gsheetId, gid });
+        const lower     = sheetName.toLowerCase().trim();
+
+        // Skip setup, config, process calculations, or internal hidden sheets
+        if (lower === 'setup' || lower === 'config' || lower.startsWith('_') || lower.startsWith('process')) {
+            continue;
+        }
+
+        if (lower.startsWith('rekap') || lower.includes('ledger')) {
+            rekapChildren.push({ label: sheetName, value: valueObj });
+        } else if (lower.startsWith('cetak') || lower.startsWith('rapor')) {
+            cetakChildren.push({ label: sheetName, value: valueObj });
+        } else {
+            tabChildren.push({ label: sheetName, value: valueObj });
+        }
+    }
+
+    kelasNode.children.push(...tabChildren);
+    if (rekapChildren.length > 0) kelasNode.children.push({ label: 'Rekapitulasi', children: rekapChildren });
+    if (cetakChildren.length > 0) kelasNode.children.push({ label: 'Cetak Rapor',  children: cetakChildren });
+
+    return kelasNode;
+}
+
 
 // -----------------------------------------------------------------------
 //  buildEkskulNodes
@@ -380,8 +439,16 @@ async function runSync() {
                     tahunAjaran: ta.name,
                     semester:    semesterNum,
                     type:        'semester',
-                    label:       `Semester ${semesterNum}`,
+                    label:       `Nilai Semester ${semesterNum}`,
                     data: { dataMapel: [], dataEkskul: [], dataStandalone: [...standaloneSpreadsheets] },
+                };
+
+                const btqData = {
+                    tahunAjaran: ta.name,
+                    semester:    semesterNum,
+                    type:        'btq',
+                    label:       `BTQ Semester ${semesterNum}`,
+                    data: { dataMapel: [], dataEkskul: [], dataStandalone: [] },
                 };
 
                 const semesterContents = await getFolderContents(sem.id);
@@ -425,31 +492,58 @@ async function runSync() {
                             // Skip any Ekskul file that happens to live inside a folder
                             if (cf.name.toLowerCase().includes('eks')) continue;
 
+                            const isBtq = cf.name.toLowerCase().includes('btq');
                             processedSheets.push({ id: cf.id, name: cf.name });
-                            try {
-                                semesterData.data.dataMapel.push(await buildMapelNode(cf));
-                                await addLog('PROCESS_MAPEL_SUCCESS', 'SUCCESS', `Successfully read spreadsheet "${cf.name}"`);
-                            } catch (e) {
-                                console.error(`❌ Mapel "${cf.name}" failed:`, e.message);
-                                await addLog('PROCESS_MAPEL_ERROR', 'ERROR', `Failed reading spreadsheet "${cf.name}": ${e.message}`);
-                                throw e; // Re-throw to fail the entire sync
+
+                            if (isBtq) {
+                                try {
+                                    btqData.data.dataMapel.push(await buildBtqNode(cf));
+                                    await addLog('PROCESS_BTQ_SUCCESS', 'SUCCESS', `Successfully read BTQ "${cf.name}"`);
+                                } catch (e) {
+                                    console.error(`❌ BTQ "${cf.name}" failed:`, e.message);
+                                    await addLog('PROCESS_BTQ_ERROR', 'ERROR', `Failed reading BTQ "${cf.name}": ${e.message}`);
+                                    throw e; // Re-throw to fail the entire sync
+                                }
+                            } else {
+                                try {
+                                    semesterData.data.dataMapel.push(await buildMapelNode(cf));
+                                    await addLog('PROCESS_MAPEL_SUCCESS', 'SUCCESS', `Successfully read spreadsheet "${cf.name}"`);
+                                } catch (e) {
+                                    console.error(`❌ Mapel "${cf.name}" failed:`, e.message);
+                                    await addLog('PROCESS_MAPEL_ERROR', 'ERROR', `Failed reading spreadsheet "${cf.name}": ${e.message}`);
+                                    throw e; // Re-throw to fail the entire sync
+                                }
                             }
                         }
 
                     // ── CLASS SPREADSHEET directly in Semester folder ───────
                     // (Handles flat Drive structure without group sub-folders)
                     } else if (item.mimeType === 'application/vnd.google-apps.spreadsheet') {
-                        await addLog('PROCESS_MAPEL', 'PENDING',
-                            `Processing class spreadsheet: ${item.name}`);
-
+                        const isBtq = item.name.toLowerCase().includes('btq');
                         processedSheets.push({ id: item.id, name: item.name });
-                        try {
-                            semesterData.data.dataMapel.push(await buildMapelNode(item));
-                            await addLog('PROCESS_MAPEL_SUCCESS', 'SUCCESS', `Successfully read spreadsheet "${item.name}"`);
-                        } catch (e) {
-                            console.error(`❌ Mapel "${item.name}" failed:`, e.message);
-                            await addLog('PROCESS_MAPEL_ERROR', 'ERROR', `Failed reading spreadsheet "${item.name}": ${e.message}`);
-                            throw e; // Re-throw to fail the entire sync
+
+                        if (isBtq) {
+                            await addLog('PROCESS_BTQ', 'PENDING',
+                                `Processing BTQ spreadsheet: ${item.name}`);
+                            try {
+                                btqData.data.dataMapel.push(await buildBtqNode(item));
+                                await addLog('PROCESS_BTQ_SUCCESS', 'SUCCESS', `Successfully read BTQ "${item.name}"`);
+                            } catch (e) {
+                                console.error(`❌ BTQ "${item.name}" failed:`, e.message);
+                                await addLog('PROCESS_BTQ_ERROR', 'ERROR', `Failed reading BTQ "${item.name}": ${e.message}`);
+                                throw e; // Re-throw to fail the entire sync
+                            }
+                        } else {
+                            await addLog('PROCESS_MAPEL', 'PENDING',
+                                `Processing class spreadsheet: ${item.name}`);
+                            try {
+                                semesterData.data.dataMapel.push(await buildMapelNode(item));
+                                await addLog('PROCESS_MAPEL_SUCCESS', 'SUCCESS', `Successfully read spreadsheet "${item.name}"`);
+                            } catch (e) {
+                                console.error(`❌ Mapel "${item.name}" failed:`, e.message);
+                                await addLog('PROCESS_MAPEL_ERROR', 'ERROR', `Failed reading spreadsheet "${item.name}": ${e.message}`);
+                                throw e; // Re-throw to fail the entire sync
+                            }
                         }
                     }
                 }
@@ -460,6 +554,14 @@ async function runSync() {
                 );
 
                 finalData.push(semesterData);
+
+                // If any BTQ spreadsheets were found in this semester, add BTQ period entry
+                if (btqData.data.dataMapel.length > 0) {
+                    btqData.data.dataMapel.sort((a, b) =>
+                        a.label.localeCompare(b.label, 'id', { numeric: true })
+                    );
+                    finalData.push(btqData);
+                }
             }
         }
 

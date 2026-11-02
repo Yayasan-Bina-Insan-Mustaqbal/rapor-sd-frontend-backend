@@ -6,10 +6,10 @@
 <!-- Modal Animation Styles -->
 <style>
   @keyframes modalIn {
-    from { opacity: 0; transform: scale(0.92) translateY(14px); }
+    from { opacity: 0; transform: scale(0.94) translateY(12px); }
     to   { opacity: 1; transform: scale(1)    translateY(0); }
   }
-  .animate-modal-in { animation: modalIn 0.28s cubic-bezier(0.34,1.56,0.64,1) both; }
+  .animate-modal-in { animation: modalIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 </style>
 
 <div
@@ -19,12 +19,13 @@
   class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm"
   x-cloak
 >
-  <div class="relative w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden animate-modal-in">
+  <div class="relative w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden animate-modal-in">
     <!-- Close button (only if navigation already built) -->
     <button
       x-show="navHtml"
       @click="showSemesterModal = false"
-      class="absolute top-4 right-4 text-white/80 hover:text-white transition-colors duration-200 z-10"
+      type="button"
+      class="absolute top-4 right-4 text-white/80 hover:text-white transition-colors duration-200 z-10 p-1 rounded-full hover:bg-white/10"
       title="Tutup"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -33,56 +34,122 @@
     </button>
 
     <!-- Gradient header -->
-    <div class="bg-gradient-to-br from-atlantis-800 via-atlantis-700 to-atlantis-500 px-6 pt-8 pb-7 text-center">
-      <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 shadow-inner">
-        <svg class="h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <div class="bg-gradient-to-br from-atlantis-800 via-atlantis-700 to-atlantis-500 px-6 pt-7 pb-6 text-center">
+      <div class="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 shadow-inner">
+        <svg class="h-7 w-7 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
         </svg>
       </div>
       <h2 class="text-xl font-bold text-white tracking-tight">Selamat Datang di Rapor SD 🎓</h2>
-      <p class="mt-1.5 text-sm text-atlantis-100/90">Silakan pilih Tahun Ajaran &amp; Semester untuk melanjutkan</p>
+      <p class="mt-1 text-sm text-atlantis-100/90">Silakan pilih Tahun Ajaran &amp; Mode Rapor untuk melanjutkan</p>
     </div>
 
-    <!-- Period buttons -->
-    <div class="px-6 py-5 space-y-3">
-      <template x-for="(entry, index) in periodData" :key="index">
+    <!-- Active Academic Year Section (Cards) -->
+    <div class="px-6 py-4 space-y-2.5 max-h-[50vh] overflow-y-auto">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-xs font-bold uppercase tracking-wider text-gray-500" x-text="`Tahun Ajaran Aktif (${activeYear})`"></span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-atlantis-100 text-atlantis-800">Tahun Ajaran Utama</span>
+      </div>
+
+      <template x-for="(entry, index) in activePeriods" :key="'active-' + index">
         <button
           @click="selectPeriod(entry)"
-          class="period-btn group flex items-center gap-4 w-full rounded-xl border-2 border-gray-200 bg-white px-5 py-4 text-left transition-all duration-200 hover:border-atlantis-500 hover:bg-atlantis-50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-atlantis-400"
+          type="button"
+          class="period-btn group flex items-center gap-3.5 w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-left transition-all duration-200 hover:border-atlantis-500 hover:bg-atlantis-50/50 hover:shadow-xs focus:outline-none focus:ring-2 focus:ring-atlantis-400"
         >
-          <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-atlantis-100 text-atlantis-700 group-hover:bg-atlantis-500 group-hover:text-white transition-colors duration-200">
+          <!-- Left Icon Box -->
+          <div 
+            class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl transition-colors duration-200"
+            :class="{
+              'bg-emerald-100 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white': entry.type === 'btq',
+              'bg-amber-100 text-amber-700 group-hover:bg-amber-600 group-hover:text-white': entry.type === 'administrasi' || entry.semester === 0,
+              'bg-atlantis-100 text-atlantis-700 group-hover:bg-atlantis-600 group-hover:text-white': entry.type === 'semester'
+            }"
+          >
             <!-- Icon for Administrasi -->
             <svg x-show="entry.type === 'administrasi' || entry.semester === 0" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
-            <!-- Icon for Semester Ganjil -->
-            <svg x-show="entry.type !== 'administrasi' && entry.semester === 1" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <!-- Icon for BTQ -->
+            <svg x-show="entry.type === 'btq'" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+            <!-- Icon for Semester Ganjil (Mapel) -->
+            <svg x-show="entry.type === 'semester' && entry.semester === 1" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m8.66-9h-1M4.34 12h-1m15.07-6.07-.71.71M6.34 17.66l-.71.71m12.73 0-.71-.71M6.34 6.34l-.71-.71M12 7a5 5 0 100 10A5 5 0 0012 7z"/>
             </svg>
-            <!-- Icon for Semester Genap -->
-            <svg x-show="entry.type !== 'administrasi' && entry.semester !== 1 && entry.semester !== 0" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <!-- Icon for Semester Genap (Mapel) -->
+            <svg x-show="entry.type === 'semester' && entry.semester !== 1 && entry.semester !== 0" class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
             </svg>
           </div>
+
+          <!-- Label & Subtitle -->
           <div class="flex-1 min-w-0">
-            <div class="font-semibold text-gray-800 text-base" x-text="entry.tahunAjaran"></div>
-            <div class="text-sm text-gray-500 group-hover:text-atlantis-700 transition-colors">
-              <span x-show="entry.type === 'administrasi' || entry.semester === 0">Administrasi (1 Tahun Penuh)</span>
-              <span x-show="entry.type !== 'administrasi' && entry.semester !== 0">
-                <span x-text="entry.semester === 1 ? 'Semester Ganjil' : 'Semester Genap'"></span>
-                &bull; Semester <span x-text="entry.semester"></span>
-              </span>
+            <div class="flex items-center gap-2">
+              <span class="font-semibold text-gray-800 text-sm" x-text="entry.type === 'btq' ? `BTQ Semester ${entry.semester}` : (entry.type === 'administrasi' || entry.semester === 0 ? 'Administrasi Guru' : `Nilai Semester ${entry.semester}`)"></span>
+              <span 
+                class="px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide"
+                :class="{
+                  'bg-emerald-50 text-emerald-700 border border-emerald-200': entry.type === 'btq',
+                  'bg-amber-50 text-amber-700 border border-amber-200': entry.type === 'administrasi' || entry.semester === 0,
+                  'bg-atlantis-50 text-atlantis-800 border border-atlantis-200': entry.type === 'semester'
+                }"
+                x-text="entry.type === 'btq' ? 'Al-Qur\'an' : (entry.type === 'administrasi' || entry.semester === 0 ? '1 Tahun Penuh' : (entry.semester === 1 ? 'Semester Ganjil' : 'Semester Genap'))"
+              ></span>
+            </div>
+            <div class="text-xs text-gray-500 mt-0.5 truncate">
+              <span x-text="entry.tahunAjaran"></span>
+              <span class="mx-1">&bull;</span>
+              <span x-text="entry.type === 'btq' ? 'Rapor Baca Tulis Al-Qur\'an' : (entry.type === 'administrasi' || entry.semester === 0 ? 'Dokumen Administrasi Kelas' : 'Rapor Mata Pelajaran & Ekstrakurikuler')"></span>
             </div>
           </div>
-          <svg class="h-5 w-5 text-gray-300 group-hover:text-atlantis-500 transition-colors flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+
+          <!-- Arrow -->
+          <svg class="h-5 w-5 text-gray-300 group-hover:text-atlantis-600 transition-colors flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
           </svg>
         </button>
       </template>
     </div>
 
+    <!-- Archive Section (Tahun Ajaran Sebelumnya - 1 Row Compact Chips) -->
+    <div x-show="archivePeriods.length > 0" class="border-t border-gray-100 bg-gray-50/80 px-6 py-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-bold uppercase tracking-wider text-gray-500">
+          Arsip Tahun Ajaran Sebelumnya
+        </span>
+        <span class="text-[11px] text-gray-400" x-text="`${archivePeriods.length} pilihan arsip`"></span>
+      </div>
+      
+      <!-- One horizontal row of compact chips (wrap cleanly) -->
+      <div class="flex flex-wrap items-center gap-2">
+        <template x-for="(entry, index) in archivePeriods" :key="'arch-' + index">
+          <button
+            @click="selectPeriod(entry)"
+            type="button"
+            class="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-xs font-medium text-gray-700 hover:border-atlantis-500 hover:bg-atlantis-50 hover:text-atlantis-900 transition-all duration-150 shadow-2xs focus:outline-none focus:ring-1 focus:ring-atlantis-400 cursor-pointer"
+            :title="`${entry.tahunAjaran} - ${entry.label}`"
+          >
+            <span
+              class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              :class="{
+                'bg-emerald-500': entry.type === 'btq',
+                'bg-amber-500': entry.type === 'administrasi' || entry.semester === 0,
+                'bg-sky-500': entry.type === 'semester'
+              }"
+            ></span>
+            <span x-text="formatArchiveChipLabel(entry)"></span>
+            <svg class="h-3 w-3 text-gray-400 group-hover:text-atlantis-600 transition-colors" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+            </svg>
+          </button>
+        </template>
+      </div>
+    </div>
+
     <!-- Footer -->
-    <div class="border-t border-gray-100 bg-gray-50 px-6 py-3 text-center">
+    <div class="border-t border-gray-100 bg-gray-50 px-6 py-2.5 text-center">
       <p class="text-xs text-gray-400">SDI Insan Taqwa &bull; Sistem Rapor Digital</p>
     </div>
   </div>
